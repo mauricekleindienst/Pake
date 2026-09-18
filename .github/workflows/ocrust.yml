@@ -37,6 +37,18 @@ jobs:
       # The unit tests need no models and no ONNX Runtime.
       - run: cargo test -p ocrust-core --lib
 
+  python-lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ruff
+      - run: ruff check python tests scripts
+      - run: ruff format --check python tests scripts
+
   wheels:
     name: wheel (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -64,11 +76,14 @@ jobs:
         run: |
           pip install "maturin>=1.7,<2.0"
           maturin build --release --target ${{ matrix.target }} -o dist
-      - name: Install and smoke-test
+      - name: Build the model wheel
+        run: python scripts/build_models_wheel.py --models-dir models/ppocrv6 -o dist
+      - name: Install and test
         run: |
-          pip install --find-links dist ocrust pytest numpy
+          pip install --find-links dist "ocrust[models]" pytest numpy pillow
           python -c "import ocrust; print(ocrust.__version__); print(ocrust.runtime_info())"
-          # Model-dependent tests skip themselves when no bundle is installed.
+          ocrust languages
+          # Models ship with the wheel, so the full suite runs here.
           pytest -q
       - uses: actions/upload-artifact@v4
         with:
@@ -78,7 +93,7 @@ jobs:
   publish:
     name: publish to PyPI
     if: startsWith(github.ref, 'refs/tags/ocrust-v')
-    needs: [rust, wheels]
+    needs: [rust, python-lint, wheels]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
